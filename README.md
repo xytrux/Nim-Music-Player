@@ -29,11 +29,12 @@ A personal music streaming server built with Nim that can serve music from **Git
 3. Set these environment variables in Railway:
 
 ```bash
-MUSIC_SOURCE=github
-GIT_REPO_URL=yourusername/your-private-music-repo
-GIT_TOKEN=your_github_token_here
-GIT_BRANCH=main
-GIT_MUSIC_PATH=music
+GIT_BRANCH="main"
+GIT_MUSIC_PATH="/"
+GIT_REPO_URL="yourusername/your-private-music-repo"
+GIT_TOKEN="your_github_token_here"
+MUSIC_SOURCE="github"
+PORT="8080"
 ```
 
 ### Step 3: Deploy! 🎉
@@ -44,32 +45,35 @@ Railway will automatically build and deploy your music player!
 
 ### GitHub Private Repository
 ```bash
-MUSIC_SOURCE=github
-GIT_REPO_URL=xytrux/my-music-collection
-GIT_TOKEN=ghp_xxxxxxxxxxxxxxxxxxxx
-GIT_BRANCH=main
-GIT_MUSIC_PATH=music
+GIT_BRANCH="main"
+GIT_MUSIC_PATH="music"
+GIT_REPO_URL="yourusername/your-private-music-repo"
+GIT_TOKEN="ghp_xxxxxxxxxxxxxxxxxxxx"
+MUSIC_SOURCE="github"
+PORT="8080"
 ```
 
 ### GitLab Private Repository
 ```bash
-MUSIC_SOURCE=gitlab
-GIT_REPO_URL=https://gitlab.com/username/music-repo
-GIT_TOKEN=glpat-xxxxxxxxxxxxxxxxxxxx
-GIT_BRANCH=main
-GIT_MUSIC_PATH=audio
+GIT_BRANCH="main"
+GIT_MUSIC_PATH="audio"
+GIT_REPO_URL="yourusername/your-private-music-repo"
+GIT_TOKEN="glpat-xxxxxxxxxxxxxxxxxxxx"
+MUSIC_SOURCE="gitlab"
+PORT="8080"
 ```
 
 ### Public Repository (Demo Mode)
 ```bash
-MUSIC_SOURCE=github
-GIT_REPO_URL=username/public-music-demos
+MUSIC_SOURCE="github"
+GIT_REPO_URL="username/public-music-demos"
+PORT="8080"
 # No token needed for public repos
 ```
 
 ### Local Development
 ```bash
-MUSIC_SOURCE=local
+MUSIC_SOURCE="local"
 # Uses ./music directory
 ```
 
@@ -99,8 +103,8 @@ MUSIC_SOURCE=local
 
 1. Clone this repository:
 ```bash
-git clone https://github.com/xytrux/nim-music-player.git
-cd nim-music-player
+git clone https://github.com/xytrux/Nim-Music-Player.git
+cd Nim-Music-Player
 ```
 
 2. Set up environment variables:
@@ -111,7 +115,7 @@ cp .env.example .env
 
 3. Run the server:
 ```bash
-nim c -r src/main.nim
+nim c -r --threads:on -d:ssl src/main.nim
 ```
 
 4. Open `http://localhost:8080`
