@@ -19,6 +19,7 @@ type
     path: string
     title: string
     rawUrl: string  # For git-based sources
+    sha: string     # For GitHub blob API
 
 # Forward declarations
 proc fetchMusicFromGit(): Future[seq[Song]] {.async, gcsafe.}
@@ -124,7 +125,8 @@ proc scanMusicDirectory(dir: string): seq[Song] =
             filename: extractFilename(path),
             path: path,
             title: name,
-            rawUrl: ""
+            rawUrl: "",
+            sha: ""
           ))
   
   of msGitHub, msGitLab, msGitRepo:
@@ -219,11 +221,15 @@ proc fetchMusicFromGit(): Future[seq[Song]] {.async, gcsafe.} =
             let title = splitFile(filename).name
             echo "🔍 Debug - Adding song: ", title, " URL: ", rawUrl
             
+            # Get SHA for blob API access
+            let sha = if item.hasKey("sha"): item["sha"].getStr() else: ""
+            
             songs.add(Song(
               filename: filename,
               path: filename,
               title: title,
-              rawUrl: rawUrl
+              rawUrl: rawUrl,
+              sha: sha
             ))
     
     of msGitLab:
@@ -240,7 +246,8 @@ proc fetchMusicFromGit(): Future[seq[Song]] {.async, gcsafe.} =
               filename: filename,
               path: filename,
               title: title,
-              rawUrl: rawUrl
+              rawUrl: rawUrl,
+              sha: ""  # GitLab doesn't use SHA the same way
             ))
     
     else:
@@ -545,25 +552,43 @@ proc serveFile(filename: string): Future[string] {.async, gcsafe.} =
       return ""
   
   of msGitHub, msGitLab, msGitRepo:
-    # Find the song in our global list to get the correct download URL
-    for song in globalSongs:
-      if song.filename == filename:
-        let client = newAsyncHttpClient()
-        defer: client.close()
-        
-        try:
-          echo "Streaming from: ", song.rawUrl
-          let response = await client.get(song.rawUrl)
-          
-          if response.status.startsWith("200"):
-            return await response.body
-          else:
-            echo "Failed to fetch file: ", response.status
-            return ""
+    # Stream file directly from GitHub API using blob endpoint
+    let config = getGitConfig()
+    let client = newAsyncHttpClient()
+    defer: client.close()
+    
+    try:
+      # Add authorization header
+      if config.token != "":
+        client.headers = newHttpHeaders({"Authorization": "token " & config.token})
+      
+      # Find the song to get its SHA
+      for song in globalSongs:
+        if song.filename == filename:
+          if song.sha != "":
+            # Use the stored SHA to get file content via blobs API
+            let (owner, repo) = parseGitHubUrl(config.repoUrl)
+            let blobUrl = fmt"https://api.github.com/repos/{owner}/{repo}/git/blobs/{song.sha}"
+            echo "Getting blob from: ", blobUrl
             
-        except Exception as e:
-          echo "Error streaming file: ", e.msg
-          return ""
+            # Set accept header for raw content
+            client.headers["Accept"] = "application/vnd.github.raw"
+            
+            let blobResponse = await client.get(blobUrl)
+            
+            if blobResponse.status.startsWith("200"):
+              echo "Successfully fetched file via GitHub blobs API"
+              return await blobResponse.body
+            else:
+              echo "Failed to fetch blob: ", blobResponse.status
+              return ""
+          else:
+            echo "No SHA available for file: ", filename
+            return ""
+          
+    except Exception as e:
+      echo "Error streaming file via GitHub API: ", e.msg
+      return ""
     
     echo "Song not found: ", filename
     return ""
@@ -602,8 +627,9 @@ proc handleRequest(req: Request) {.async, gcsafe.} =
     await req.respond(Http500, "Internal server error")
 
 proc main() {.async, gcsafe.} =
-  # Load environment variables from .env file
-  loadEnvFile()
+  # Load environment variables from .env file (only for local development)
+  if fileExists(".env"):
+    loadEnvFile()
   
   let server = newAsyncHttpServer()
   let source = getMusicSource()
