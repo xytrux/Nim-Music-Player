@@ -47,7 +47,7 @@ proc generateHTML(songs: seq[Song]): string =
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>FLAC Music Player</title>
+    <title>Nim Music Player</title>
     <style>
         * {
             margin: 0;
@@ -208,8 +208,8 @@ proc generateHTML(songs: seq[Song]): string =
 <body>
     <div class="container">
         <div class="header">
-            <h1>🎵 FLAC Music Player</h1>
-            <p>High-quality audio streaming from /music directory</p>
+            <h1>🎵 Nim Music Player</h1>
+            <p>Personal Music Player for everywhere</p>
         </div>
         
         <div class="player-section">
@@ -236,7 +236,7 @@ proc generateHTML(songs: seq[Song]): string =
   if songs.len == 0:
     result.add("""
                 <div class="empty-state">
-                    <p>No music files found in /music directory</p>
+                    <p>No music files found in music directory</p>
                     <p>Supported formats: FLAC, MP3, WAV, OGG, M4A</p>
                 </div>
 """)
