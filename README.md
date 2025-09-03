@@ -30,7 +30,7 @@ A personal music streaming server built with Nim that can serve music from **Git
 
 ```bash
 GIT_BRANCH="main"
-GIT_MUSIC_PATH="/"
+GIT_MUSIC_PATH="music"
 GIT_REPO_URL="yourusername/your-private-music-repo"
 GIT_TOKEN="your_github_token_here"
 MUSIC_SOURCE="github"
