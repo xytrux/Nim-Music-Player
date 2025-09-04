@@ -2,5 +2,3 @@ src/main
 main
 .env
 *.log
-music/
-playlists
