@@ -24,14 +24,15 @@ A personal music streaming server built with Nim that can serve music from **Git
 
 ### Step 2: Deploy to Railway
 
-[![Deploy on Railway](https://railway.com/button.svg)](https://railway.com/deploy/3aUovc?referralCode=sai&utm_medium=integration&utm_source=template&utm_campaign=generic)
+[![Deploy on Railway](https://railway.com/button.svg)](https://railway.com/deploy/melodious-respect?referralCode=sai&utm_medium=integration&utm_source=template&utm_campaign=generic)
+
 
 Set these environment variables in Railway:
 
 ```bash
 GIT_BRANCH="main"
 GIT_MUSIC_PATH="music"
-GIT_REPO_URL="yourusername/your-private-music-repo"
+GIT_REPO_URL="yourusername/your-private-music-repo"[![Deploy on Railway](https://railway.com/button.svg)](https://railway.com/deploy/melodious-respect?referralCode=sai&utm_medium=integration&utm_source=template&utm_campaign=generic)
 GIT_TOKEN="your_github_token_here"
 MUSIC_SOURCE="github"
 PORT="3478"
