@@ -34,7 +34,7 @@ GIT_MUSIC_PATH="music"
 GIT_REPO_URL="yourusername/your-private-music-repo"
 GIT_TOKEN="your_github_token_here"
 MUSIC_SOURCE="github"
-PORT="8080"
+PORT="3478"
 ```
 
 ## 🔧 Configuration Options
@@ -46,7 +46,7 @@ GIT_MUSIC_PATH="music"
 GIT_REPO_URL="yourusername/your-private-music-repo"
 GIT_TOKEN="ghp_xxxxxxxxxxxxxxxxxxxx"
 MUSIC_SOURCE="github"
-PORT="8080"
+PORT="3478"
 ```
 
 ### GitLab Private Repository
@@ -56,14 +56,14 @@ GIT_MUSIC_PATH="audio"
 GIT_REPO_URL="yourusername/your-private-music-repo"
 GIT_TOKEN="glpat-xxxxxxxxxxxxxxxxxxxx"
 MUSIC_SOURCE="gitlab"
-PORT="8080"
+PORT="3478"
 ```
 
 ### Public Repository (Demo Mode)
 ```bash
 MUSIC_SOURCE="github"
 GIT_REPO_URL="username/public-music-demos"
-PORT="8080"
+PORT="3478"
 # No token needed for public repos
 ```
 

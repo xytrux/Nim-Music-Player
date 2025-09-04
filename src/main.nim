@@ -2,7 +2,17 @@ import asynchttpserver, asyncdispatch, httpclient, strutils, os, json, sequtils,
 
 const
   MUSIC_DIR = "music"
-  SERVER_PORT = 3478
+  DEFAULT_PORT = 3478
+
+proc getServerPort(): int =
+  ## Get server port from environment variable or use default
+  let portEnv = getEnv("PORT")
+  if portEnv != "":
+    try:
+      return parseInt(portEnv)
+    except:
+      echo "⚠️  Invalid PORT environment variable, using default"
+  return DEFAULT_PORT
 
 type
   MusicSource = enum
@@ -1198,7 +1208,8 @@ proc main() {.async.} =
   # Always load local playlists regardless of music source
   loadLocalPlaylists()
   
-  echo "Server starting on http://localhost:", SERVER_PORT
+  let serverPort = getServerPort()
+  echo "Server starting on http://0.0.0.0:", serverPort
   
   let songs = scanMusicDirectory(MUSIC_DIR)
   echo "🎶 Found ", songs.len, " music files"
@@ -1217,11 +1228,11 @@ proc main() {.async.} =
       echo "📋 Failed to load playlists from GitHub: ", e.msg
       echo "📋 Will load on demand"
   
-  echo "🌐 Open http://localhost:", SERVER_PORT, " in your browser"
+  echo "🌐 Open http://localhost:", serverPort, " in your browser"
   echo "⌨️  Keyboard shortcuts: Space (play/pause), ← → (prev/next)"
   echo "🛑 Press Ctrl+C to stop the server"
   
-  server.listen(Port(SERVER_PORT))
+  server.listen(Port(serverPort), "0.0.0.0")
   
   while true:
     if server.shouldAcceptRequest():

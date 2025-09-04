@@ -11,7 +11,7 @@ COPY . /src
 RUN nim c -d:release -d:ssl --mm:orc --threads:off -o:/src/main src/main.nim
 
 # Make port 8080 available to the world outside this container
-EXPOSE 8080
+EXPOSE 3478
 
 # Run the app when the container launches
 CMD ["/src/main"]
