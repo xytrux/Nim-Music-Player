@@ -24,9 +24,9 @@ A personal music streaming server built with Nim that can serve music from **Git
 
 ### Step 2: Deploy to Railway
 
-1. Fork this repository
-2. Connect it to Railway
-3. Set these environment variables in Railway:
+[![Deploy on Railway](https://railway.com/button.svg)](https://railway.com/deploy/3aUovc?referralCode=sai&utm_medium=integration&utm_source=template&utm_campaign=generic)
+
+Set these environment variables in Railway:
 
 ```bash
 GIT_BRANCH="main"
@@ -36,10 +36,6 @@ GIT_TOKEN="your_github_token_here"
 MUSIC_SOURCE="github"
 PORT="8080"
 ```
-
-### Step 3: Deploy! 🎉
-
-Railway will automatically build and deploy your music player!
 
 ## 🔧 Configuration Options
 

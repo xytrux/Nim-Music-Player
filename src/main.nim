@@ -1,8 +1,8 @@
-import asynchttpserver, asyncdispatch, httpclient, strutils, os, json, sequtils, algorithm, uri, mimetypes, strformat, base64, tables
+import asynchttpserver, asyncdispatch, httpclient, strutils, os, json, sequtils, algorithm, uri, mimetypes, strformat, base64, tables, times
 
 const
   MUSIC_DIR = "music"
-  SERVER_PORT = 8080
+  SERVER_PORT = 3478
 
 type
   MusicSource = enum
@@ -25,8 +25,57 @@ type
 proc fetchMusicFromGit(): Future[seq[Song]] {.async, gcsafe.}
 proc loadEnvFile()
 
-# Global songs list for URL lookup
+# Global songs list for URL lookup and favorites
 var globalSongs: seq[Song]
+var userFavorites: seq[string] = @[]  # Simple favorites list
+var localFiles: Table[string, string] = initTable[string, string]()
+var userPlaylists {.global.}: Table[string, seq[string]] = initTable[string, seq[string]]()
+
+# GitHub repository configuration
+const REPO_OWNER = "arm"
+const REPO_NAME = "tim_music"  
+const GITHUB_TOKEN = ""  # Add your GitHub token here if repo is private
+
+# Cache for music files to avoid repeated GitHub API calls
+var musicCache = initTable[string, string]()  # filename -> file content
+var cacheHits = 0
+var cacheMisses = 0
+
+proc getCacheStats(): string {.gcsafe.} =
+  {.cast(gcsafe).}:
+    let totalRequests = cacheHits + cacheMisses
+    if totalRequests == 0:
+      return "Cache: No requests yet"
+    let hitRate = (cacheHits.float / totalRequests.float) * 100.0
+    return fmt"Cache: {musicCache.len} files, {cacheHits} hits, {cacheMisses} misses ({hitRate:.1f}% hit rate)"
+
+proc loadLocalPlaylists() {.gcsafe.} =
+  ## Load playlists from local playlists directory
+  {.cast(gcsafe).}:
+    let playlistsDir = "playlists"
+    if not dirExists(playlistsDir):
+      return
+    
+    echo "🔍 Debug - Loading local playlists..."
+    
+    for kind, path in walkDir(playlistsDir):
+      if kind == pcFile and path.endsWith(".json"):
+        try:
+          let content = readFile(path)
+          let data = parseJson(content)
+          let playlistName = data["name"].getStr()
+          let songs = data["songs"].getElems().mapIt(it.getStr())
+          userPlaylists[playlistName] = songs
+          echo "📋 Loaded local playlist: ", playlistName
+        except Exception as e:
+          echo "📋 Failed to load playlist ", path, ": ", e.msg
+    
+    echo "📋 Loaded ", userPlaylists.len, " local playlists"
+
+proc clearCache() {.gcsafe.} =
+  {.cast(gcsafe).}:
+    musicCache.clear()
+    echo "🗑️  Music cache cleared"
 
 proc loadEnvFile() =
   # Simple .env file loader
@@ -106,36 +155,189 @@ proc getGitHubRawUrl(owner, repo, path, filename, branch: string): string =
 proc getGitLabRawUrl(owner, repo, path, filename, branch: string): string =
   return fmt"https://gitlab.com/{owner}/{repo}/-/raw/{branch}/{path}/{filename}"
 
-proc scanMusicDirectory(dir: string): seq[Song] =
-  {.cast(gcsafe).}:
-    var songs: seq[Song] = @[]
+proc uploadToGitHub(owner, repo, path, filename, content, commitMessage, token, branch: string): Future[bool] {.async.} =
+  ## Upload content to GitHub repository
+  try:
+    let uploadUrl = fmt"https://api.github.com/repos/{owner}/{repo}/contents/{path}/{filename}"
+    echo "🔍 Debug - Upload URL: ", uploadUrl
+    flushFile(stdout)
+    
+    let uploadData = %*{
+      "message": commitMessage,
+      "content": content,
+      "branch": branch
+    }
+    
+    var headers = newHttpHeaders([
+      ("Content-Type", "application/json"),
+      ("Accept", "application/vnd.github.v3+json"),
+      ("User-Agent", "Nim-Music-Player")
+    ])
+    
+    if token.len > 0:
+      headers["Authorization"] = "token " & token
+      echo "🔍 Debug - Using GitHub token for authentication"
+      flushFile(stdout)
+    
+    echo "🔍 Debug - Sending upload request..."
+    flushFile(stdout)
+    let client = newAsyncHttpClient()
+    defer: client.close()
+    
+    let uploadResponse = await client.request(uploadUrl, httpMethod = HttpPut, body = $uploadData, headers = headers)
+    
+    if uploadResponse.code == Http201:
+      echo "🔍 Debug - File uploaded successfully to GitHub"
+      flushFile(stdout)
+      return true
+    else:
+      let uploadBody = await uploadResponse.body
+      echo "🔍 Debug - GitHub upload failed: ", uploadResponse.code, " - ", uploadBody
+      flushFile(stdout)
+      return false
+      
+  except Exception as e:
+    echo "🔍 Debug - GitHub upload error: ", e.msg
+    flushFile(stdout)
+    return false
+
+proc deleteFromGitHub(owner, repo, path, filename, commitMessage, token, branch: string): Future[bool] {.async.} =
+  ## Delete file from GitHub repository
+  try:
+    # First get the file's SHA (required for deletion)
+    let getUrl = fmt"https://api.github.com/repos/{owner}/{repo}/contents/{path}/{filename}?ref={branch}"
+    echo "🔍 Debug - Getting file SHA from: ", getUrl
+    
+    var headers = newHttpHeaders([
+      ("Accept", "application/vnd.github.v3+json"),
+      ("User-Agent", "Nim-Music-Player")
+    ])
+    
+    if token.len > 0:
+      headers["Authorization"] = "token " & token
+    
+    let client = newAsyncHttpClient()
+    defer: client.close()
+    
+    let getResponse = await client.request(getUrl, httpMethod = HttpGet, headers = headers)
+    
+    if getResponse.code == Http200:
+      let getBody = await getResponse.body
+      let jsonData = parseJson(getBody)
+      let sha = jsonData["sha"].getStr()
+      echo "🔍 Debug - File SHA: ", sha
+      
+      # Now delete the file
+      let deleteUrl = fmt"https://api.github.com/repos/{owner}/{repo}/contents/{path}/{filename}"
+      let deleteData = %*{
+        "message": commitMessage,
+        "sha": sha,
+        "branch": branch
+      }
+      
+      headers["Content-Type"] = "application/json"
+      let deleteResponse = await client.request(deleteUrl, httpMethod = HttpDelete, body = $deleteData, headers = headers)
+      
+      if deleteResponse.code == Http200:
+        echo "🔍 Debug - File deleted successfully from GitHub"
+        return true
+      else:
+        let deleteBody = await deleteResponse.body
+        echo "🔍 Debug - GitHub delete failed: ", deleteResponse.code, " - ", deleteBody
+        return false
+    else:
+      let getBodyError = await getResponse.body
+      echo "🔍 Debug - Failed to get file SHA: ", getResponse.code, " - ", getBodyError
+      return false
+      
+  except Exception as e:
+    echo "🔍 Debug - GitHub delete error: ", e.msg
+    return false
+
+proc fetchPlaylistsFromGitHub(): Future[Table[string, seq[string]]] {.async, gcsafe.} =
+  ## Fetch playlists from GitHub repository
+  var playlists = initTable[string, seq[string]]()
+  let config = getGitConfig()
   let source = getMusicSource()
   
-  case source
-  of msLocal:
-    if not dirExists(dir):
-      echo "Warning: Music directory ", dir, " does not exist"
-      return songs
+  if source != msGitHub or config.repoUrl == "":
+    echo "🔍 Debug - Not configured for GitHub playlists"
+    return playlists
+  
+  try:
+    let client = newAsyncHttpClient()
+    defer: client.close()
     
-    for kind, path in walkDir(dir):
-      if kind == pcFile:
-        let (_, name, ext) = splitFile(path)
-        if ext.toLowerAscii() in [".flac", ".mp3", ".wav", ".ogg", ".m4a"]:
-          songs.add(Song(
-            filename: extractFilename(path),
-            path: path,
-            title: name,
-            rawUrl: "",
-            sha: ""
-          ))
+    if config.token != "":
+      client.headers = newHttpHeaders({"Authorization": "token " & config.token})
+    
+    let (owner, repo) = parseGitHubUrl(config.repoUrl)
+    let apiUrl = fmt"https://api.github.com/repos/{owner}/{repo}/contents/playlists?ref={config.branch}"
+    echo "🔍 Debug - Fetching playlists from: ", apiUrl
+    
+    let response = await client.get(apiUrl)
+    
+    if response.code == Http200:
+      let responseBody = await response.body
+      let jsonData = parseJson(responseBody)
+      
+      for item in jsonData:
+        if item["type"].getStr() == "file" and item["name"].getStr().endsWith(".json"):
+          let filename = item["name"].getStr()
+          let playlistName = filename[0..^6]  # Remove .json extension
+          let downloadUrl = item["download_url"].getStr()
+          
+          echo "🔍 Debug - Downloading playlist: ", playlistName
+          let playlistResponse = await client.get(downloadUrl)
+          
+          if playlistResponse.code == Http200:
+            try:
+              let playlistBody = await playlistResponse.body
+              let playlistData = parseJson(playlistBody)
+              if playlistData.hasKey("songs"):
+                let songs = playlistData["songs"].getElems().mapIt(it.getStr())
+                playlists[playlistName] = songs
+                echo "🔍 Debug - Loaded playlist '", playlistName, "' with ", songs.len, " songs"
+            except:
+              echo "🔍 Debug - Failed to parse playlist: ", playlistName
+    else:
+      echo "🔍 Debug - Failed to fetch playlists: ", response.code
+      
+  except Exception as e:
+    echo "🔍 Debug - Error fetching playlists: ", e.msg
   
-  of msGitHub, msGitLab, msGitRepo:
-    # Fetch music list from Git repository
-    songs = waitFor fetchMusicFromGit()
-  
-  songs.sort(proc(a, b: Song): int = cmp(a.title, b.title))
-  globalSongs = songs  # Store globally for URL lookup
-  return songs
+  return playlists
+
+proc scanMusicDirectory(dir: string): seq[Song] {.gcsafe.} =
+  {.cast(gcsafe).}:
+    var songs: seq[Song] = @[]
+    let source = getMusicSource()
+    
+    case source
+    of msLocal:
+      if not dirExists(dir):
+        echo "Warning: Music directory ", dir, " does not exist"
+        return songs
+      
+      for kind, path in walkDir(dir):
+        if kind == pcFile:
+          let (_, name, ext) = splitFile(path)
+          if ext.toLowerAscii() in [".flac", ".mp3", ".wav", ".ogg", ".m4a"]:
+            songs.add(Song(
+              filename: extractFilename(path),
+              path: path,
+              title: name,
+              rawUrl: "",
+              sha: ""
+            ))
+    
+    of msGitHub, msGitLab, msGitRepo:
+      # Fetch music list from Git repository
+      songs = waitFor fetchMusicFromGit()
+    
+    songs.sort(proc(a, b: Song): int = cmp(a.title, b.title))
+    globalSongs = songs  # Store globally for URL lookup
+    return songs
 
 proc fetchMusicFromGit(): Future[seq[Song]] {.async, gcsafe.} =
   var songs: seq[Song] = @[]
@@ -417,6 +619,36 @@ proc generateHTML(songs: seq[Song]): string =
             transform: translateY(0);
         }
         
+        .toggle-btn {
+            background: #6c757d;
+            color: white;
+            border: none;
+            padding: 10px 15px;
+            border-radius: 20px;
+            cursor: pointer;
+            font-size: 0.9em;
+            transition: all 0.3s ease;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        }
+        
+        .toggle-btn.active {
+            background: linear-gradient(135deg, #667eea, #764ba2);
+            transform: translateY(-1px);
+            box-shadow: 0 4px 15px rgba(0,0,0,0.2);
+        }
+        
+        .toggle-btn:hover {
+            transform: translateY(-1px);
+            box-shadow: 0 4px 15px rgba(0,0,0,0.2);
+        }
+        
+        .secondary-controls {
+            display: flex;
+            justify-content: center;
+            gap: 10px;
+            margin-top: 15px;
+        }
+        
         .empty-state {
             text-align: center;
             color: #666;
@@ -443,6 +675,10 @@ proc generateHTML(songs: seq[Song]): string =
                 <button class="control-btn" onclick="previousSong()">⏮️ Previous</button>
                 <button class="control-btn" onclick="togglePlayPause()">⏯️ Play/Pause</button>
                 <button class="control-btn" onclick="nextSong()">⏭️ Next</button>
+            </div>
+            <div class="secondary-controls">
+                <button class="toggle-btn" id="shuffleBtn" onclick="toggleShuffle()">🔀 Shuffle</button>
+                <button class="toggle-btn" id="repeatBtn" onclick="toggleRepeat()">🔁 Repeat</button>
             </div>
         </div>
         
@@ -479,9 +715,26 @@ proc generateHTML(songs: seq[Song]): string =
     <script>
         let currentSongIndex = -1;
         let songs = """ & $(%songs.mapIt(%{"filename": %it.filename, "title": %it.title})) & """;
+        let isShuffleEnabled = false;
+        let repeatMode = 0; // 0: off, 1: repeat all, 2: repeat one
+        let shuffledIndices = [];
+        let shufflePosition = 0;
+        
         const audioPlayer = document.getElementById('audioPlayer');
         const currentSongElement = document.getElementById('currentSong');
         const songList = document.getElementById('songList');
+        const shuffleBtn = document.getElementById('shuffleBtn');
+        const repeatBtn = document.getElementById('repeatBtn');
+        
+        // Initialize shuffle indices
+        function generateShuffledIndices() {
+            shuffledIndices = Array.from({length: songs.length}, (_, i) => i);
+            for (let i = shuffledIndices.length - 1; i > 0; i--) {
+                const j = Math.floor(Math.random() * (i + 1));
+                [shuffledIndices[i], shuffledIndices[j]] = [shuffledIndices[j], shuffledIndices[i]];
+            }
+            shufflePosition = 0;
+        }
         
         function playSong(filename, title, index) {
             audioPlayer.src = '/stream/' + encodeURIComponent(filename);
@@ -506,20 +759,81 @@ proc generateHTML(songs: seq[Song]): string =
         
         function nextSong() {
             if (songs.length === 0) return;
-            currentSongIndex = (currentSongIndex + 1) % songs.length;
+            
+            if (repeatMode === 2) { // Repeat one
+                // Just replay the current song
+                const song = songs[currentSongIndex];
+                playSong(song.filename, song.title, currentSongIndex);
+                return;
+            }
+            
+            if (isShuffleEnabled) {
+                shufflePosition = (shufflePosition + 1) % shuffledIndices.length;
+                currentSongIndex = shuffledIndices[shufflePosition];
+            } else {
+                currentSongIndex = (currentSongIndex + 1) % songs.length;
+            }
+            
             const song = songs[currentSongIndex];
             playSong(song.filename, song.title, currentSongIndex);
         }
         
         function previousSong() {
             if (songs.length === 0) return;
-            currentSongIndex = currentSongIndex <= 0 ? songs.length - 1 : currentSongIndex - 1;
+            
+            if (isShuffleEnabled) {
+                shufflePosition = shufflePosition <= 0 ? shuffledIndices.length - 1 : shufflePosition - 1;
+                currentSongIndex = shuffledIndices[shufflePosition];
+            } else {
+                currentSongIndex = currentSongIndex <= 0 ? songs.length - 1 : currentSongIndex - 1;
+            }
+            
             const song = songs[currentSongIndex];
             playSong(song.filename, song.title, currentSongIndex);
         }
         
+        function toggleShuffle() {
+            isShuffleEnabled = !isShuffleEnabled;
+            shuffleBtn.classList.toggle('active', isShuffleEnabled);
+            
+            if (isShuffleEnabled) {
+                generateShuffledIndices();
+                // Find current song in shuffle order
+                shufflePosition = shuffledIndices.indexOf(currentSongIndex);
+                shuffleBtn.textContent = '🔀 Shuffle: ON';
+            } else {
+                shuffleBtn.textContent = '🔀 Shuffle';
+            }
+        }
+        
+        function toggleRepeat() {
+            repeatMode = (repeatMode + 1) % 3;
+            repeatBtn.classList.toggle('active', repeatMode > 0);
+            
+            switch (repeatMode) {
+                case 0:
+                    repeatBtn.textContent = '🔁 Repeat';
+                    break;
+                case 1:
+                    repeatBtn.textContent = '🔁 Repeat: ALL';
+                    break;
+                case 2:
+                    repeatBtn.textContent = '🔂 Repeat: ONE';
+                    break;
+            }
+        }
+        
+        // Enhanced auto-play logic
+        function handleSongEnd() {
+            if (repeatMode === 0 && !isShuffleEnabled && currentSongIndex === songs.length - 1) {
+                // Stop at end if no repeat and no shuffle
+                return;
+            }
+            nextSong();
+        }
+        
         // Auto-play next song when current song ends
-        audioPlayer.addEventListener('ended', nextSong);
+        audioPlayer.addEventListener('ended', handleSongEnd);
         
         // Keyboard shortcuts
         document.addEventListener('keydown', function(e) {
@@ -539,94 +853,324 @@ proc generateHTML(songs: seq[Song]): string =
 
 proc serveFile(filename: string): Future[string] {.async, gcsafe.} =
   {.cast(gcsafe).}:
+    # Check if it's a local uploaded file first
+    if localFiles.hasKey(filename):
+      try:
+        # Decode base64 content
+        return decode(localFiles[filename])
+      except:
+        echo "Failed to decode local file: ", filename
+        return ""
+    
     let source = getMusicSource()
-  
-  case source
-  of msLocal:
-    let filePath = MUSIC_DIR / filename
-    if not fileExists(filePath):
-      return ""
-    try:
-      return readFile(filePath)
-    except:
-      return ""
-  
-  of msGitHub, msGitLab, msGitRepo:
-    # Stream file directly from GitHub API using blob endpoint
-    let config = getGitConfig()
-    let client = newAsyncHttpClient()
-    defer: client.close()
     
-    try:
-      # Add authorization header
-      if config.token != "":
-        client.headers = newHttpHeaders({"Authorization": "token " & config.token})
+    case source
+    of msLocal:
+      let filePath = MUSIC_DIR / filename
+      if not fileExists(filePath):
+        return ""
+      try:
+        return readFile(filePath)
+      except:
+        return ""
+    
+    of msGitHub, msGitLab, msGitRepo:
+      # Check cache first
+      if musicCache.hasKey(filename):
+        echo "🎯 Cache HIT for: ", filename, " (", cacheHits + 1, " hits, ", cacheMisses, " misses)"
+        inc(cacheHits)
+        return musicCache[filename]
       
-      # Find the song to get its SHA
-      for song in globalSongs:
-        if song.filename == filename:
-          if song.sha != "":
-            # Use the stored SHA to get file content via blobs API
-            let (owner, repo) = parseGitHubUrl(config.repoUrl)
-            let blobUrl = fmt"https://api.github.com/repos/{owner}/{repo}/git/blobs/{song.sha}"
-            echo "Getting blob from: ", blobUrl
-            
-            # Set accept header for raw content
-            client.headers["Accept"] = "application/vnd.github.raw"
-            
-            let blobResponse = await client.get(blobUrl)
-            
-            if blobResponse.status.startsWith("200"):
-              echo "Successfully fetched file via GitHub blobs API"
-              return await blobResponse.body
+      echo "💾 Cache MISS for: ", filename, " - fetching from GitHub..."
+      inc(cacheMisses)
+      
+      # Stream file directly from GitHub API using blob endpoint
+      let config = getGitConfig()
+      let client = newAsyncHttpClient()
+      defer: client.close()
+      
+      try:
+        # Add authorization header
+        if config.token != "":
+          client.headers = newHttpHeaders({"Authorization": "token " & config.token})
+        
+        # Find the song to get its SHA
+        for song in globalSongs:
+          if song.filename == filename:
+            if song.sha != "":
+              # Use the stored SHA to get file content via blobs API
+              let (owner, repo) = parseGitHubUrl(config.repoUrl)
+              let blobUrl = fmt"https://api.github.com/repos/{owner}/{repo}/git/blobs/{song.sha}"
+              echo "Getting blob from: ", blobUrl
+              
+              # Set accept header for raw content
+              client.headers["Accept"] = "application/vnd.github.raw"
+              
+              let blobResponse = await client.get(blobUrl)
+              
+              if blobResponse.status.startsWith("200"):
+                let fileContent = await blobResponse.body
+                echo "✅ Successfully fetched file via GitHub blobs API (", fileContent.len, " bytes)"
+                
+                # Cache the file content
+                musicCache[filename] = fileContent
+                echo "💾 Cached file: ", filename, " (cache size: ", musicCache.len, " files)"
+                
+                return fileContent
+              else:
+                echo "❌ Failed to fetch blob: ", blobResponse.status
+                return ""
             else:
-              echo "Failed to fetch blob: ", blobResponse.status
+              echo "⚠️  No SHA available for file: ", filename
               return ""
-          else:
-            echo "No SHA available for file: ", filename
-            return ""
-          
-    except Exception as e:
-      echo "Error streaming file via GitHub API: ", e.msg
+            
+      except Exception as e:
+        echo "💥 Error streaming file via GitHub API: ", e.msg
+        return ""
+      
+      echo "🔍 Song not found: ", filename
       return ""
-    
-    echo "Song not found: ", filename
-    return ""
+
+proc serveStaticFile(filePath: string): Future[string] {.async, gcsafe.} =
+  {.cast(gcsafe).}:
+    try:
+      if fileExists(filePath):
+        result = readFile(filePath)
+      else:
+        result = ""
+    except:
+      result = ""
+
+proc getStaticMimeType(filename: string): string =
+  let ext = splitFile(filename).ext.toLowerAscii()
+  case ext
+  of ".html": "text/html"
+  of ".css": "text/css"
+  of ".js": "application/javascript"
+  of ".json": "application/json"
+  of ".png": "image/png"
+  of ".jpg", ".jpeg": "image/jpeg"
+  of ".gif": "image/gif"
+  of ".svg": "image/svg+xml"
+  of ".ico": "image/x-icon"
+  else: "text/plain"
 
 proc handleRequest(req: Request) {.async, gcsafe.} =
-  let path = req.url.path
-  
-  try:
-    if path == "/" or path == "":
-      # Serve main page
-      let songs = scanMusicDirectory(MUSIC_DIR)
-      let html = generateHTML(songs)
-      await req.respond(Http200, html, newHttpHeaders([("Content-Type", "text/html")]))
+  {.cast(gcsafe).}:
+    let path = req.url.path
     
-    elif path.startsWith("/stream/"):
-      # Stream audio file
-      let filename = decodeUrl(path.replace("/stream/", ""))
-      let content = await serveFile(filename)
+    try:
+      if path == "/" or path == "":
+        # Serve main page from public directory
+        let indexPath = "public/index.html"
+        let content = await serveStaticFile(indexPath)
+        if content != "":
+          await req.respond(Http200, content, newHttpHeaders([("Content-Type", "text/html")]))
+        else:
+          await req.respond(Http404, "index.html not found")
       
-      if content == "":
-        await req.respond(Http404, "File not found")
+      elif path.startsWith("/public/") or path.startsWith("/static/"):
+        # Serve static files (CSS, JS, etc.)
+        let cleanPath = path.replace("/public/", "").replace("/static/", "")
+        let filePath = "public/" & cleanPath
+        let content = await serveStaticFile(filePath)
+        
+        if content != "":
+          let mimeType = getStaticMimeType(cleanPath)
+          await req.respond(Http200, content, newHttpHeaders([("Content-Type", mimeType)]))
+        else:
+          await req.respond(Http404, "Static file not found")
+      
+      elif path == "/style.css":
+        # Direct access to CSS
+        let content = await serveStaticFile("public/style.css")
+        if content != "":
+          await req.respond(Http200, content, newHttpHeaders([("Content-Type", "text/css")]))
+        else:
+          await req.respond(Http404, "CSS file not found")
+      
+      elif path == "/app.js":
+        # Direct access to JS
+        let content = await serveStaticFile("public/app.js")
+        if content != "":
+          await req.respond(Http200, content, newHttpHeaders([("Content-Type", "application/javascript")]))
+        else:
+          await req.respond(Http404, "JS file not found")
+      
+      elif path.startsWith("/music/"):
+        # Stream audio file (updated endpoint)
+        let filename = decodeUrl(path.replace("/music/", ""))
+        let content = await serveFile(filename)
+        
+        if content == "":
+          await req.respond(Http404, "File not found")
+        else:
+          let mimeType = getMimeType(filename)
+          let headers = newHttpHeaders([
+            ("Content-Type", mimeType),
+            ("Accept-Ranges", "bytes"),
+            ("Content-Length", $content.len)
+          ])
+          await req.respond(Http200, content, headers)
+      
+      elif path.startsWith("/stream/"):
+        # Legacy stream endpoint for compatibility
+        let filename = decodeUrl(path.replace("/stream/", ""))
+        let content = await serveFile(filename)
+        
+        if content == "":
+          await req.respond(Http404, "File not found")
+        else:
+          let mimeType = getMimeType(filename)
+          let headers = newHttpHeaders([
+            ("Content-Type", mimeType),
+            ("Accept-Ranges", "bytes"),
+            ("Content-Length", $content.len)
+          ])
+          await req.respond(Http200, content, headers)
+      
+      elif path == "/api/songs":
+        # Return songs list as JSON
+        let songs = scanMusicDirectory(MUSIC_DIR)
+        let songList = songs.mapIt(it.filename)
+        let response = %songList
+        await req.respond(Http200, $response, newHttpHeaders([("Content-Type", "application/json")]))
+      
+      elif path == "/api/cache-stats":
+        # Return cache statistics
+        let stats = getCacheStats()
+        let jsonStats = %*{
+          "cached_files": musicCache.len,
+          "cache_hits": cacheHits,
+          "cache_misses": cacheMisses,
+          "hit_rate": if (cacheHits + cacheMisses) > 0: (cacheHits.float / (cacheHits + cacheMisses).float) * 100.0 else: 0.0,
+          "message": stats
+        }
+        await req.respond(Http200, $jsonStats, newHttpHeaders([("Content-Type", "application/json")]))
+      
+      elif path == "/api/clear-cache":
+        # Clear the cache
+        clearCache()
+        let response = %*{"message": "Cache cleared successfully"}
+        await req.respond(Http200, $response, newHttpHeaders([("Content-Type", "application/json")]))
+      
+      elif path == "/api/favorites":
+        if req.reqMethod == HttpGet:
+          # Get favorites
+          let response = %userFavorites
+          await req.respond(Http200, $response, newHttpHeaders([("Content-Type", "application/json")]))
+        elif req.reqMethod == HttpPost:
+          # Add/remove favorite
+          let body = req.body
+          try:
+            let jsonData = parseJson(body)
+            let songName = jsonData["song"].getStr()
+            let action = jsonData["action"].getStr()
+            
+            if action == "add" and songName notin userFavorites:
+              userFavorites.add(songName)
+            elif action == "remove":
+              userFavorites = userFavorites.filterIt(it != songName)
+            
+            let response = %*{"message": "Favorites updated", "favorites": userFavorites}
+            await req.respond(Http200, $response, newHttpHeaders([("Content-Type", "application/json")]))
+          except:
+            await req.respond(Http400, "Invalid JSON")
+        else:
+          await req.respond(Http405, "Method not allowed")
+      
+      elif path == "/api/config":
+        # Get current configuration
+        if req.reqMethod == HttpGet:
+          let musicSource = getMusicSource()
+          let currentDir = getCurrentDir()
+          let musicDir = currentDir / MUSIC_DIR
+          
+          let sourceText = case musicSource
+            of msLocal: "Local"
+            of msGitHub: "GitHub"
+            of msGitLab: "GitLab"
+            of msGitRepo: "Git Repository"
+          
+          let response = %*{
+            "source": sourceText,
+            "directory": musicDir,
+            "relativeDirectory": MUSIC_DIR
+          }
+          await req.respond(Http200, $response, newHttpHeaders([("Content-Type", "application/json")]))
+        else:
+          await req.respond(Http405, "Method not allowed")
+      
+      elif path == "/api/playlists":
+        if req.reqMethod == HttpGet:
+          # Get all playlists
+          let response = %userPlaylists
+          await req.respond(Http200, $response, newHttpHeaders([("Content-Type", "application/json")]))
+        elif req.reqMethod == HttpPost:
+          # Create/update playlist
+          try:
+            let body = req.body
+            let jsonData = parseJson(body)
+            let playlistName = jsonData["name"].getStr()
+            let songs = jsonData["songs"].getElems().mapIt(it.getStr())
+            
+            # Store in memory
+            userPlaylists[playlistName] = songs
+            
+            # Always save playlists locally regardless of music source
+            echo "🔍 Debug - Saving playlist locally..."
+            let playlistsDir = "playlists"
+            if not dirExists(playlistsDir):
+              createDir(playlistsDir)
+            
+            let playlistData = %*{
+              "name": playlistName,
+              "songs": songs,
+              "created": $now(),
+              "type": "playlist"
+            }
+            
+            let playlistFile = playlistsDir / (playlistName & ".json")
+            writeFile(playlistFile, $playlistData)
+            echo "🔍 Debug - Playlist saved locally to: ", playlistFile
+            
+            let response = %*{"message": "Playlist saved", "name": playlistName}
+            await req.respond(Http200, $response, newHttpHeaders([("Content-Type", "application/json")]))
+          except:
+            await req.respond(Http400, "Invalid playlist data")
+        else:
+          await req.respond(Http405, "Method not allowed")
+      
+      elif path.startsWith("/api/playlists/"):
+        # Handle individual playlist operations
+        let playlistName = path[15..^1].decodeUrl()  # Remove "/api/playlists/" prefix
+        if req.reqMethod == HttpDelete:
+          # Delete playlist
+          if userPlaylists.hasKey(playlistName):
+            userPlaylists.del(playlistName)
+            
+            # Delete local playlist file
+            echo "🔍 Debug - Deleting local playlist file..."
+            let playlistFile = "playlists" / (playlistName & ".json")
+            if fileExists(playlistFile):
+              removeFile(playlistFile)
+              echo "🔍 Debug - Local playlist file deleted: ", playlistFile
+            
+            let response = %*{"message": "Playlist deleted", "name": playlistName}
+            await req.respond(Http200, $response, newHttpHeaders([("Content-Type", "application/json")]))
+          else:
+            await req.respond(Http404, "Playlist not found")
+        else:
+          await req.respond(Http405, "Method not allowed")
+      
       else:
-        let mimeType = getMimeType(filename)
-        let headers = newHttpHeaders([
-          ("Content-Type", mimeType),
-          ("Accept-Ranges", "bytes"),
-          ("Content-Length", $content.len)
-        ])
-        await req.respond(Http200, content, headers)
-    
-    else:
-      await req.respond(Http404, "Not found")
-      
-  except Exception as e:
-    echo "Error handling request: ", e.msg
-    await req.respond(Http500, "Internal server error")
+        await req.respond(Http404, "Not found")
+        
+    except Exception as e:
+      echo "Error handling request: ", e.msg
+      await req.respond(Http500, "Internal server error")
 
-proc main() {.async, gcsafe.} =
+proc main() {.async.} =
   # Load environment variables from .env file (only for local development)
   if fileExists(".env"):
     loadEnvFile()
@@ -651,10 +1195,27 @@ proc main() {.async, gcsafe.} =
     echo "Music path: ", config.musicPath
     echo "Token configured: ", (if config.token != "": "Yes" else: "No")
   
+  # Always load local playlists regardless of music source
+  loadLocalPlaylists()
+  
   echo "Server starting on http://localhost:", SERVER_PORT
   
   let songs = scanMusicDirectory(MUSIC_DIR)
   echo "🎶 Found ", songs.len, " music files"
+  echo "💾 Music cache initialized (will cache files on first access)"
+  
+  # Load playlists from GitHub if configured
+  if source == msGitHub:
+    echo "🔍 Loading playlists from GitHub..."
+    try:
+      # Load playlists and assign to global variable
+      let loadedPlaylists = waitFor fetchPlaylistsFromGitHub()
+      {.cast(gcsafe).}:
+        userPlaylists = loadedPlaylists
+      echo "📋 Loaded ", userPlaylists.len, " playlists from GitHub"
+    except Exception as e:
+      echo "📋 Failed to load playlists from GitHub: ", e.msg
+      echo "📋 Will load on demand"
   
   echo "🌐 Open http://localhost:", SERVER_PORT, " in your browser"
   echo "⌨️  Keyboard shortcuts: Space (play/pause), ← → (prev/next)"

@@ -1,17 +1,6 @@
-# Build artifacts
 src/main
 main
-
-# Environment files with sensitive tokens
 .env
-
-# System files
-.DS_Store
-Thumbs.db
-
-# Logs
 *.log
-
-# Local music directory (if using local mode)
 music/
-music-no
+playlists
