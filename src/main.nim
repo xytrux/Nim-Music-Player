@@ -265,6 +265,63 @@ proc deleteFromGitHub(owner, repo, path, filename, commitMessage, token, branch:
     echo "🔍 Debug - GitHub delete error: ", e.msg
     return false
 
+proc fetchSongsFromGitHub(): Future[seq[Song]] {.async, gcsafe.} =
+  ## Fetch songs from GitHub repository with format detection
+  var songs: seq[Song] = @[]
+  let config = getGitConfig()
+  let source = getMusicSource()
+  
+  if source != msGitHub or config.repoUrl == "":
+    return songs
+  
+  try:
+    let client = newAsyncHttpClient()
+    defer: client.close()
+    
+    if config.token != "":
+      client.headers = newHttpHeaders({"Authorization": "token " & config.token})
+    
+    let (owner, repo) = parseGitHubUrl(config.repoUrl)
+    let apiUrl = fmt"https://api.github.com/repos/{owner}/{repo}/contents/{config.musicPath}?ref={config.branch}"
+    
+    let response = await client.get(apiUrl)
+    
+    if response.code == Http200:
+      let responseBody = await response.body
+      let jsonData = parseJson(responseBody)
+      
+      for item in jsonData:
+        if item["type"].getStr() == "file":
+          let filename = item["name"].getStr()
+          let ext = filename.split('.')[^1].toLower()
+          
+          # Only include music files
+          if ext in ["mp3", "flac", "wav", "ogg", "m4a"]:
+            let format = case ext:
+              of "mp3": "MP3"
+              of "flac": "FLAC"
+              of "wav": "WAV"
+              of "ogg": "OGG"
+              of "m4a": "M4A"
+              else: "Unknown"
+            
+            let rawUrl = getGitHubRawUrl(owner, repo, config.musicPath, filename, config.branch)
+            let sha = item["sha"].getStr()
+            
+            songs.add(Song(
+              filename: filename,
+              path: "", # Not used for GitHub
+              title: filename,
+              format: format,
+              rawUrl: rawUrl,
+              sha: sha
+            ))
+      
+  except Exception as e:
+    echo "🔍 Debug - Error fetching songs from GitHub: ", e.msg
+  
+  return songs
+
 proc fetchPlaylistsFromGitHub(): Future[Table[string, seq[string]]] {.async, gcsafe.} =
   ## Fetch playlists from GitHub repository
   var playlists = initTable[string, seq[string]]()
@@ -1051,7 +1108,12 @@ proc handleRequest(req: Request) {.async, gcsafe.} =
       
       elif path == "/api/songs":
         # Return songs list as JSON with format information
-        let songs = scanMusicDirectory(MUSIC_DIR)
+        let source = getMusicSource()
+        let songs = if source == msGitHub:
+          waitFor fetchSongsFromGitHub()
+        else:
+          scanMusicDirectory(MUSIC_DIR)
+          
         let songData = songs.mapIt(%*{
           "filename": it.filename,
           "title": it.title,
