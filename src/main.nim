@@ -28,8 +28,9 @@ type
     filename: string
     path: string
     title: string
-    rawUrl: string  # For git-based sources
-    sha: string     # For GitHub blob API
+    format: string   # File format (MP3, FLAC, etc.)
+    rawUrl: string   # For git-based sources
+    sha: string      # For GitHub blob API
 
 # Forward declarations
 proc fetchMusicFromGit(): Future[seq[Song]] {.async, gcsafe.}
@@ -333,10 +334,19 @@ proc scanMusicDirectory(dir: string): seq[Song] {.gcsafe.} =
         if kind == pcFile:
           let (_, name, ext) = splitFile(path)
           if ext.toLowerAscii() in [".flac", ".mp3", ".wav", ".ogg", ".m4a"]:
+            let format = case ext.toLowerAscii()
+              of ".mp3": "MP3"
+              of ".flac": "FLAC"
+              of ".wav": "WAV"
+              of ".ogg": "OGG"
+              of ".m4a": "M4A"
+              else: "Unknown"
+            
             songs.add(Song(
               filename: extractFilename(path),
               path: path,
               title: name,
+              format: format,
               rawUrl: "",
               sha: ""
             ))
@@ -1040,10 +1050,14 @@ proc handleRequest(req: Request) {.async, gcsafe.} =
           await req.respond(Http200, content, headers)
       
       elif path == "/api/songs":
-        # Return songs list as JSON
+        # Return songs list as JSON with format information
         let songs = scanMusicDirectory(MUSIC_DIR)
-        let songList = songs.mapIt(it.filename)
-        let response = %songList
+        let songData = songs.mapIt(%*{
+          "filename": it.filename,
+          "title": it.title,
+          "format": it.format
+        })
+        let response = %songData
         await req.respond(Http200, $response, newHttpHeaders([("Content-Type", "application/json")]))
       
       elif path == "/api/cache-stats":

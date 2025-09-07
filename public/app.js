@@ -383,13 +383,13 @@ class MusicPlayer {
         songList.innerHTML = playlistSongs.map((song, index) => {
             const originalIndex = this.songs.indexOf(song);
             return `
-                <li class="song-item" data-index="${originalIndex}" data-playlist-song="${song}">
+                <li class="song-item" data-index="${originalIndex}" data-playlist-song="${song.filename}">
                     <div class="song-number">${String(index + 1).padStart(2, '0')}</div>
                     <div class="song-title">${this.formatSongTitle(song)}</div>
                     <div class="song-actions">
-                        <button class="favorite-btn ${this.favorites.has(song) ? 'favorited' : ''}" 
-                                data-song="${song}" title="Add to favorites">
-                            <svg width="16" height="16" viewBox="0 0 24 24" fill="${this.favorites.has(song) ? 'var(--accent-color)' : 'none'}" stroke="currentColor" stroke-width="2">
+                        <button class="favorite-btn ${this.favorites.has(song.filename) ? 'favorited' : ''}" 
+                                data-song="${song.filename}" title="Add to favorites">
+                            <svg width="16" height="16" viewBox="0 0 24 24" fill="${this.favorites.has(song.filename) ? 'var(--accent-color)' : 'none'}" stroke="currentColor" stroke-width="2">
                                 <path d="M12 21.35l-1.45-1.32C5.4 15.36 2 12.28 2 8.5 2 5.42 4.42 3 7.5 3c1.74 0 3.41.81 4.5 2.09C13.09 3.81 14.76 3 16.5 3 19.58 3 22 5.42 22 8.5c0 3.78-3.4 6.86-8.55 11.54L12 21.35z"/>
                             </svg>
                         </button>
@@ -399,7 +399,7 @@ class MusicPlayer {
                                 <path d="M6 18L18 6M6 6l12 12"/>
                             </svg>
                         </button>
-                        <div class="song-format">FLAC</div>
+                        <div class="song-format">${song.format}</div>
                     </div>
                 </li>
             `;
@@ -973,21 +973,21 @@ class MusicPlayer {
         songList.innerHTML = this.songs.map((song, index) => `
             <li class="song-item" data-index="${index}">
                 <div class="song-number">${String(index + 1).padStart(2, '0')}</div>
-                <div class="song-title">${this.formatSongTitle(song)}</div>
+                <div class="song-title">${this.formatSongTitle(song.title || song.filename)}</div>
+                <div class="song-format">${song.format || 'Unknown'}</div>
                 <div class="song-actions">
-                    <button class="favorite-btn ${this.favorites.has(song) ? 'favorited' : ''}" 
-                            data-song="${song}" title="Add to favorites">
-                        <svg width="16" height="16" viewBox="0 0 24 24" fill="${this.favorites.has(song) ? 'var(--accent-color)' : 'none'}" stroke="currentColor" stroke-width="2">
+                    <button class="favorite-btn ${this.favorites.has(song.filename) ? 'favorited' : ''}" 
+                            data-song="${song.filename}" title="Add to favorites">
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="${this.favorites.has(song.filename) ? 'var(--accent-color)' : 'none'}" stroke="currentColor" stroke-width="2">
                             <path d="M12 21.35l-1.45-1.32C5.4 15.36 2 12.28 2 8.5 2 5.42 4.42 3 7.5 3c1.74 0 3.41.81 4.5 2.09C13.09 3.81 14.76 3 16.5 3 19.58 3 22 5.42 22 8.5c0 3.78-3.4 6.86-8.55 11.54L12 21.35z"/>
                         </svg>
                     </button>
                     <button class="add-to-playlist-btn" 
-                            data-song="${song}" title="Add to playlist">
+                            data-song="${song.filename}" title="Add to playlist">
                         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                             <path d="M19 13H13v6h-2v-6H5v-2h6V5h2v6h6v2z"/>
                         </svg>
                     </button>
-                    <div class="song-format">FLAC</div>
                 </div>
             </li>
         `).join('');
@@ -1084,9 +1084,9 @@ class MusicPlayer {
 
     loadTF2Playlist() {
         const tf2Songs = this.songs.filter(song => 
-            song.toLowerCase().includes('valve') || 
-            song.toLowerCase().includes('team fortress') ||
-            song.toLowerCase().includes('tf2')
+            song.filename.toLowerCase().includes('valve') || 
+            song.filename.toLowerCase().includes('team fortress') ||
+            song.filename.toLowerCase().includes('tf2')
         );
         
         const tf2List = document.getElementById('tf2-list');
@@ -1110,19 +1110,19 @@ class MusicPlayer {
                         <div class="song-number">${String(index + 1).padStart(2, '0')}</div>
                         <div class="song-title">${this.formatSongTitle(song)}</div>
                         <div class="song-actions">
-                            <button class="favorite-btn ${this.favorites.has(song) ? 'favorited' : ''}" 
-                                    data-song="${song}" title="Add to favorites">
-                                <svg width="16" height="16" viewBox="0 0 24 24" fill="${this.favorites.has(song) ? 'var(--accent-color)' : 'none'}" stroke="currentColor" stroke-width="2">
+                            <button class="favorite-btn ${this.favorites.has(song.filename) ? 'favorited' : ''}" 
+                                    data-song="${song.filename}" title="Add to favorites">
+                                <svg width="16" height="16" viewBox="0 0 24 24" fill="${this.favorites.has(song.filename) ? 'var(--accent-color)' : 'none'}" stroke="currentColor" stroke-width="2">
                                     <path d="M12 21.35l-1.45-1.32C5.4 15.36 2 12.28 2 8.5 2 5.42 4.42 3 7.5 3c1.74 0 3.41.81 4.5 2.09C13.09 3.81 14.76 3 16.5 3 19.58 3 22 5.42 22 8.5c0 3.78-3.4 6.86-8.55 11.54L12 21.35z"/>
                                 </svg>
                             </button>
                             <button class="add-to-playlist-btn" 
-                                    data-song="${song}" title="Add to playlist">
+                                    data-song="${song.filename}" title="Add to playlist">
                                 <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                                     <path d="M19 13H13v6h-2v-6H5v-2h6V5h2v6h6v2z"/>
                                 </svg>
                             </button>
-                            <div class="song-format">FLAC</div>
+                            <div class="song-format">${song.format}</div>
                         </div>
                     </li>
                 `;
@@ -1155,7 +1155,7 @@ class MusicPlayer {
     }
 
     loadFavorites() {
-        const favoriteSongs = this.songs.filter(song => this.favorites.has(song));
+        const favoriteSongs = this.songs.filter(song => this.favorites.has(song.filename));
         
         const favoritesList = document.getElementById('favorites-list');
         const favoritesCount = document.getElementById('favorites-count');
@@ -1183,18 +1183,18 @@ class MusicPlayer {
                         <div class="song-title">${this.formatSongTitle(song)}</div>
                         <div class="song-actions">
                             <button class="favorite-btn favorited" 
-                                    data-song="${song}" title="Remove from favorites">
+                                    data-song="${song.filename}" title="Remove from favorites">
                                 <svg width="16" height="16" viewBox="0 0 24 24" fill="var(--accent-color)" stroke="var(--accent-color)" stroke-width="1">
                                     <path d="M12 21.35l-1.45-1.32C5.4 15.36 2 12.28 2 8.5 2 5.42 4.42 3 7.5 3c1.74 0 3.41.81 4.5 2.09C13.09 3.81 14.76 3 16.5 3 19.58 3 22 5.42 22 8.5c0 3.78-3.4 6.86-8.55 11.54L12 21.35z"/>
                                 </svg>
                             </button>
                             <button class="add-to-playlist-btn" 
-                                    data-song="${song}" title="Add to playlist">
+                                    data-song="${song.filename}" title="Add to playlist">
                                 <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                                     <path d="M19 13H13v6h-2v-6H5v-2h6V5h2v6h6v2z"/>
                                 </svg>
                             </button>
-                            <div class="song-format">FLAC</div>
+                            <div class="song-format">${song.format}</div>
                         </div>
                     </li>
                 `;
@@ -1266,10 +1266,13 @@ class MusicPlayer {
         }, 3000);
     }
 
-    formatSongTitle(filename) {
+    formatSongTitle(song) {
+        // Handle both song objects and direct filenames for backward compatibility
+        const filename = typeof song === 'string' ? song : (song.title || song.filename);
+        
         // Remove file extension and clean up the title
         return filename
-            .replace(/\.(flac|mp3|wav|m4a)$/i, '')
+            .replace(/\.(flac|mp3|wav|m4a|ogg)$/i, '')
             .replace(/^\d+\s*-\s*/, '') // Remove track numbers
             .trim();
     }
@@ -1287,8 +1290,9 @@ class MusicPlayer {
             this.updateNowPlaying(index);
             this.updateActiveSong(index);
             
-            // Load and play the audio
-            this.audioPlayer.src = `/music/${encodeURIComponent(this.currentSong)}`;
+            // Load and play the audio - use filename for the URL
+            const filename = this.currentSong.filename || this.currentSong;
+            this.audioPlayer.src = `/music/${encodeURIComponent(filename)}`;
             await this.audioPlayer.load();
             
             // Always play when a song is selected
