@@ -6,7 +6,6 @@ A personal music streaming server built with Nim that can serve music from Git r
 
 - 🎵 Supports FLAC, MP3, WAV, OGG, and M4A formats
 - 🔒 **Private Git repository music source** (GitHub/GitLab)
-- 🚀 Railway deployment ready
 - 🎨 Beautiful, responsive web interface
 - ⌨️ Keyboard controls (Space, Arrow keys)
 - 🔄 Auto-play next track
@@ -22,7 +21,7 @@ A personal music streaming server built with Nim that can serve music from Git r
    - **GitHub**: Go to Settings → Developer settings → Personal access tokens → Tokens (classic)
    - **GitLab**: Go to Profile → Access Tokens
 
-### Step 2: Deploy to Railway
+### Step 2: Deploy
 
 [![Deploy on Railway](https://railway.com/button.svg)](https://railway.com/deploy/melodious-respect?referralCode=sai&utm_medium=integration&utm_source=template&utm_campaign=generic)
 
