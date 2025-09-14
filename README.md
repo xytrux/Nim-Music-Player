@@ -1,6 +1,6 @@
-# Nim Music Player 🎵
+# Nim Music Server 🎵
 
-A personal music streaming server built with Nim that can serve music from **Git repositories**! Perfect for Railway deployment with private music collections.
+A personal music streaming server built with Nim that can serve music from Git repositories
 
 ## ✨ Features
 
