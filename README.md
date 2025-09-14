@@ -81,11 +81,6 @@ MUSIC_SOURCE="local"
 - Only you have access to the actual files
 - This public repo contains zero copyrighted content
 
-### ✅ **Railway Compatible**
-- No persistent storage needed
-- Streams directly from Git
-- Free private repositories on GitHub/GitLab
-
 ### ✅ **Version Controlled Music**
 - Track changes to your music collection
 - Organize with Git branches (genres, albums, etc.)
