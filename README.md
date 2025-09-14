@@ -32,7 +32,7 @@ Set these environment variables in Railway:
 ```bash
 GIT_BRANCH="main"
 GIT_MUSIC_PATH="music"
-GIT_REPO_URL="yourusername/your-private-music-repo"[![Deploy on Railway](https://railway.com/button.svg)](https://railway.com/deploy/melodious-respect?referralCode=sai&utm_medium=integration&utm_source=template&utm_campaign=generic)
+GIT_REPO_URL="yourusername/your-private-music-repo"
 GIT_TOKEN="your_github_token_here"
 MUSIC_SOURCE="github"
 PORT="3478"
