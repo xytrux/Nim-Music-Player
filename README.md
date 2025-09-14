@@ -60,7 +60,7 @@ MUSIC_SOURCE="gitlab"
 PORT="3478"
 ```
 
-### Public Repository (Demo Mode)
+### Public Repository (Not Recommended)
 ```bash
 MUSIC_SOURCE="github"
 GIT_REPO_URL="username/public-music-demos"
