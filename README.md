@@ -23,6 +23,7 @@ A personal music streaming server built with Nim that can serve music from Git r
 
 ### Step 2: Deploy
 
+[![Deploy to Render](https://render.com/images/deploy-to-render-button.svg)](https://render.com/deploy?repo=https%3A%2F%2Fgithub.com%2Fxytrux%2FNim-Music-Server)
 [![Deploy on Railway](https://railway.com/button.svg)](https://railway.com/deploy/melodious-respect?referralCode=sai&utm_medium=integration&utm_source=template&utm_campaign=generic)
 
 
